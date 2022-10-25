@@ -130,7 +130,9 @@ def checkUnitsAndMore(units):
       beta_report = beta/4.184**b_kcal
       units = '(kJ/mol)'
    elif units == 'kcal':
-      beta_report = 4.184**(not b_kcal)*beta
+      #Edited by Pengfei Li
+      #beta_report = 4.184**(not b_kcal)*beta
+      beta_report = 4.184**(b_kcal)*beta
       units = '(kcal/mol)'
    elif units == 'kBT':
       beta_report = 1
@@ -177,7 +179,7 @@ def uncorrelate(sta, fin, do_dhdl=False):
       # Uncorrelate based on dhdl values at a given lambda.
 
       for k in range(K):
-         # Sum up over those energy components that are changing.  
+         # Sum up over those energy components that are changing.
          # if there are repeats, we need to use the lchange[k] from the last repeated state.
          lastl = k
          for l in range(K):
@@ -331,7 +333,8 @@ def estimatewithMBAR(u_kln, N_k, reltol, regular_estimate=False):
    if regular_estimate:
       if P.overlap:
          print "The overlap matrix is..."
-         O = MBAR.computeOverlap()[2]
+         result = MBAR.computeOverlap()
+         O = result['matrix']
          for k in range(K):
             line = ''
             for l in range(K):
@@ -563,7 +566,7 @@ def estimatePairs():
          if name == 'MBAR':
             #===================================================================================================
             # Store the MBAR free energy difference (already estimated above) properly, i.e. by state.
-            #===================================================================================================        
+            #===================================================================================================
             (df['MBAR'], ddf['MBAR']) =  Deltaf_ij[k,k+1], numpy.nan_to_num(dDeltaf_ij[k,k+1])
 
       df_allk = numpy.append(df_allk,df)
@@ -576,6 +579,10 @@ def estimatePairs():
 #===================================================================================================
 
 def totalEnergies():
+
+   # Edited by Pengfei Li
+   global dF
+   global ddF
 
    # Count up the charging states.
    startcoul = 0
@@ -603,7 +610,7 @@ def totalEnergies():
    elif startcoul==endcoul:
       #There is no coulomb section
       if P.verbose: print "No Coulomb transformation present."
-      pass    
+      pass
    else:
       startcoul = 0
       startvdw = endcoul
@@ -641,7 +648,7 @@ def totalEnergies():
                      h = numpy.trim_zeros(dlam[:,j])
                      wsum = 0.5*(numpy.append(h,0) + numpy.append(0,h))
                      ddF[name] += numpy.dot(wsum**2,std_dhdl[lj,j]**2)
- 
+
             ddF[name] = numpy.sqrt(ddF[name])
 
          # Use the total energy value and uncertainty that pymbar offers.
@@ -850,6 +857,82 @@ def dF_t():
    outtext+= ["%10s %11.3f +- %5.3f %18s %11.3f +- %5.3f\n" % (ts[1:][i], F_df[i], F_ddf[i], ts[:-1][i], R_df[i], R_ddf[i]) for i in range(len(F_df))]
    outfile = open(os.path.join(P.output_directory, 'dF_t.txt'), 'w'); outfile.writelines(outtext); outfile.close()
    return
+
+#===================================================================================================
+# Edited by Pengfei Li
+#===================================================================================================
+#===================================================================================================
+# FUNCTIONS: Free energy error change vs. simulation time for MBAR. Called by the -f flag.
+#===================================================================================================
+
+def ddF_t_MBAR():
+   # Define a list of bForwrev equidistant time frames at which the free energy is to be estimated; count up the snapshots embounded between the time frames.
+   n_tf = P.bForwrev + 1
+   nss_tf = numpy.zeros([n_tf, K], int)
+
+   tf = numpy.linspace(0.0, 1.0, n_tf)*(max(nsnapshots)-1)+1
+   tf[0] = 0
+   for i in range(n_tf-1):
+      nss_tf[i+1] = numpy.array([min(j, tf[i+1]) for j in nsnapshots]) - numpy.sum(nss_tf[:i+1],axis=0)
+
+   # Define the real time scale (in ps) rather than a snapshot sequence.
+   ts = ["%.1f" % ((i-(i!=tf[0]))*P.snap_size[0] + P.equiltime) for i in tf]
+   # Initialize arrays to store data points to be plotted.
+   F_df  = numpy.zeros(n_tf-1, float)
+   F_ddf = numpy.zeros(n_tf-1, float)
+   # Store the MBAR energy that accounts for all the equilibrated snapshots (has already been computed in the previous section).
+   F_df[-1], F_ddf[-1] = (Deltaf_ij[0,K-1]/P.beta_report, dDeltaf_ij[0,K-1]/P.beta_report)
+   # Do the forward analysis.
+   sta = nss_tf[0]
+   for i in range(n_tf-2):
+      print "%60s ps..." % ts[i+1]
+      fin = numpy.sum(nss_tf[:i+2],axis=0)
+      N_k, u_kln = uncorrelate(nss_tf[0], numpy.sum(nss_tf[:i+2],axis=0))
+      F_df[i], F_ddf[i] = estimatewithMBAR(u_kln, N_k, P.relative_tolerance)
+
+   outtext = ["%12s %10s %-10s\n" % ('Time (ps)', 'Forward', P.units)]
+   outtext+= ["%10s %11.3f +- %5.3f\n" % (ts[1:][i], F_df[i], F_ddf[i]) for i in range(len(F_df))]
+   outfile = open(os.path.join(P.output_directory, 'ddF_t_MBAR.txt'), 'w'); outfile.writelines(outtext); outfile.close()
+   return
+
+##===================================================================================================
+## FUNCTIONS: Free energy error change vs. simulation time for BAR. Called by the -f flag.
+##===================================================================================================
+#def ddF_t_BAR():
+#   # Define a list of bForwrev equidistant time frames at which the free energy is to be estimated; count up the snapshots embounded between the time frames.
+#   n_tf = P.bForwrev + 1
+#   nss_tf = numpy.zeros([n_tf, K], int)
+#
+#   tf = numpy.linspace(0.0, 1.0, n_tf)*(max(nsnapshots)-1)+1
+#   tf[0] = 0
+#   for i in range(n_tf-1):
+#      nss_tf[i+1] = numpy.array([min(j, tf[i+1]) for j in nsnapshots]) - numpy.sum(nss_tf[:i+1],axis=0)
+#
+#   # Define the real time scale (in ps) rather than a snapshot sequence.
+#   ts = ["%.1f" % ((i-(i!=tf[0]))*P.snap_size[0] + P.equiltime) for i in tf]
+#   # Initialize arrays to store data points to be plotted.
+#   F_df_bar  = numpy.zeros(n_tf-1, float)
+#   F_ddf_bar = numpy.zeros(n_tf-1, float)
+#   # Store the BAR energy that accounts for all the equilibrated snapshots (has already been computed in the previous section).
+#   F_df_bar[-1], F_ddf_bar[-1] = (dF['BAR']/P.beta_report, ddF['BAR']/P.beta_report)
+#   # Do the forward analysis.
+#   sta = nss_tf[0]
+#   for i in range(n_tf-2):
+#      print "%60s ps..." % ts[i+1]
+#      fin = numpy.sum(nss_tf[:i+2],axis=0)
+#      N_k, u_kln = uncorrelate(nss_tf[0], numpy.sum(nss_tf[:i+2],axis=0))
+#      for k in range(K-1):
+#         w_F = u_kln[k,k+1,0:N_k[k]] - u_kln[k,k,0:N_k[k]]
+#         w_R = u_kln[k+1,k,0:N_k[k+1]] - u_kln[k+1,k+1,0:N_k[k+1]]
+#         (df_bar, ddf_bar) = pymbar.bar.BAR(w_F, w_R, relative_tolerance=P.relative_tolerance, verbose = P.verbose)
+#         F_df_bar[i] += df_bar
+#         F_ddf_bar[i] += ddf_bar**2
+#      F_ddf_bar[i] = numpy.sqrt(F_ddf_bar[i])
+#
+#   outtext = ["%12s %10s %-10s\n" % ('Time (ps)', 'Forward', P.units)]
+#   outtext+= ["%10s %11.3f +- %5.3f\n" % (ts[1:][i], F_df_bar[i], F_ddf_bar[i]) for i in range(len(F_df_bar))]
+#   outfile = open(os.path.join(P.output_directory, 'ddF_t_BAR.txt'), 'w'); outfile.writelines(outtext); outfile.close()
+#   return
 
 #===================================================================================================
 # FUNCTIONS: Free energy change breakdown (into lambda-pair dFs). Called by the -g flag.
@@ -1250,7 +1333,7 @@ def main():
    lchange = get_lchange(lv)
 
    #NML: Check for all zeros in data files
-   #sliu: change the all zero check to let the calculation continue if there is only dhdlt. 
+   #sliu: change the all zero check to let the calculation continue if there is only dhdlt.
    all_zeros = not numpy.any(dhdlt) and not numpy.any(u_klt)
 
    if all_zeros == True:
@@ -1286,6 +1369,10 @@ def main():
    if P.bCFM:
       if not (u_kln is None):
          plotCFM(u_kln, N_k, 50)
+   # Edited by Pengfei Li
+   if P.bForwrev:
+      ddF_t_MBAR()
+      #ddF_t_BAR()
 
    print "\nTime spent: %s hours, %s minutes, and %s seconds.\nFinished on %s" % timeStatistics(stime)
 
